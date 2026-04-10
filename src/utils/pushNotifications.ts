@@ -24,7 +24,7 @@ export async function registerForPushNotificationsAsync(): Promise<string | unde
     });
   }
 
-  if (Device.isDevice) {
+  if (Device.isDevice || Platform.OS === 'android') {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
     
@@ -67,6 +67,7 @@ export async function sendPushNotification(expoPushToken: string, title: string,
     title: title,
     body: body,
     data: { someData: 'goes here' },
+    channelId: 'default',
   };
 
   try {
