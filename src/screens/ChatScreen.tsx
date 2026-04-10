@@ -44,7 +44,7 @@ export default function ChatScreen({ route }: ChatScreenProps) {
       const fetchedMessages: Message[] = [];
       snapshot.forEach(msgDoc => {
         const data = msgDoc.data() as Message;
-        fetchedMessages.push({ id: msgDoc.id, ...data });
+        fetchedMessages.push({ ...data, id: msgDoc.id });
         
         if (data.senderId !== currentUser.uid && data.isRead === false) {
             updateDoc(doc(db, 'chats', chatId, 'messages', msgDoc.id), { isRead: true }).catch(() => {});
