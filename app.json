@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "WatchoChat",
+    "slug": "WatchoChat",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.helio.watchochat"
+    },
+    "android": {
+      "package": "com.helio.watchochat",
+      "googleServicesFile": "./google-services.json",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#121212"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "@bacons/apple-targets",
+      "./strip-push-plugin.js",
+      "expo-notifications"
+    ],
+    "extra": {
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "bundleIdentifier": "com.helio.watchochat.watch",
+                  "targetName": "watch",
+                  "entitlements": {}
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "69566345-6f10-4b03-aa53-0c6727b2046c"
+      }
+    },
+    "owner": "heliofsjr18"
+  }
+}
