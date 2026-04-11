@@ -274,7 +274,8 @@ class FirestoreService: ObservableObject {
                     "to": pushToken,
                     "title": "New Message from \(senderName) ⌚️",
                     "body": text,
-                    "sound": "default"
+                    "sound": "default",
+                    "channelId": "default"
                 ]
                 
                 guard let pushUrl = URL(string: "https://exp.host/--/api/v2/push/send") else { return }

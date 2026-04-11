@@ -1,9 +1,9 @@
 import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import { onAuthStateChanged } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { useAuthStore } from '../store/useAuthStore';
 import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
@@ -34,11 +34,11 @@ export default function AppNavigator() {
         const token = await registerForPushNotificationsAsync();
         if (token) {
           try {
-             await updateDoc(doc(db, 'users', firebaseUser.uid), {
+             await setDoc(doc(db, 'users', firebaseUser.uid), {
                 pushToken: token
-             });
-          } catch (e) {
-             console.log("Could not save push token: ", e);
+             }, { merge: true });
+          } catch (e: any) {
+             Alert.alert("DB Error", "Could not save push token to Cloud: " + e.message);
           }
         }
       }

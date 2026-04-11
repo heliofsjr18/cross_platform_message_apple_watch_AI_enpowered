@@ -1,6 +1,6 @@
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { Platform, Alert } from 'react-native';
 import Constants from 'expo-constants';
 
 // Set up the local notification behavior
@@ -36,15 +36,14 @@ export async function registerForPushNotificationsAsync(): Promise<string | unde
     }
     
     if (finalStatus !== 'granted') {
-        console.warn('Failed to get push token for push notification!');
+        Alert.alert('Error', 'Permission Denied! Android did not grant push notifications.');
         return;
     }
     
-    // Project ID is important for new Expo architecture
     try {
         const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
         if (!projectId) {
-            console.warn("EAS Project ID not found! Cannot request secure Expo token.");
+            Alert.alert('Error', "EAS Project ID not found! Cannot request secure Expo token.");
             return undefined;
         }
         
@@ -52,11 +51,12 @@ export async function registerForPushNotificationsAsync(): Promise<string | unde
            projectId: projectId
         });
         token = tokenData.data;
-    } catch (e) {
-        console.warn("Could not fetch Expo Push Token: ", e);
+        Alert.alert('Success', "SUCCESSFULLY FETCHED TOKEN: \n" + token.substring(0, 15) + "...");
+    } catch (e: any) {
+        Alert.alert("CRITICAL ERROR", "Error Fetching Token: " + e.message);
     }
   } else {
-    console.log('Must use physical device for Push Notifications');
+    Alert.alert('Error', 'Must use physical device for Push Notifications');
   }
 
   return token;
