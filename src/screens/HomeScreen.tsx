@@ -83,7 +83,7 @@ export default function HomeScreen({ navigation }: Props) {
       const querySnapshot = await getDocs(q);
       
       if (querySnapshot.empty) {
-        Alert.alert("Not Found", "No user found with that email address.");
+        Alert.alert("Not Found", `No user found with the email address "${emailToSearch}".`);
         setAddingFriend(false);
         return;
       }

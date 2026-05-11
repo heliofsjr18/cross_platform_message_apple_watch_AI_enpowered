@@ -51,8 +51,7 @@ export default function ChatScreen({ route }: ChatScreenProps) {
         }
       });
       
-      // Organically reverse back to chronological ASCENDING rendering seamlessly
-      fetchedMessages.reverse();
+      // We keep messages in descending order (newest first) for the inverted FlatList
       setMessages(fetchedMessages);
       setIsLoadingMore(false);
     });
@@ -93,7 +92,7 @@ export default function ChatScreen({ route }: ChatScreenProps) {
          }
       }
     } catch (e) {
-      console.warn("Failed to dispatch push notification: ", e);
+      // Silently handle push notification failures
     }
   };
 
@@ -106,16 +105,17 @@ export default function ChatScreen({ route }: ChatScreenProps) {
     let showDateHeader = false;
     let dateHeaderText = "";
 
-    if (index === 0) {
+    if (index === messages.length - 1) {
         showDateHeader = true;
     } else {
-        const prevItem = messages[index - 1];
-        const prevDate = prevItem.createdAt ? prevItem.createdAt.toDate() : new Date();
+        // The older message is visually ABOVE this message in an inverted list
+        const olderItem = messages[index + 1];
+        const olderDate = olderItem.createdAt ? olderItem.createdAt.toDate() : new Date();
         
         if (
-            messageDate.getDate() !== prevDate.getDate() ||
-            messageDate.getMonth() !== prevDate.getMonth() ||
-            messageDate.getFullYear() !== prevDate.getFullYear()
+            messageDate.getDate() !== olderDate.getDate() ||
+            messageDate.getMonth() !== olderDate.getMonth() ||
+            messageDate.getFullYear() !== olderDate.getFullYear()
         ) {
             showDateHeader = true;
         }
@@ -156,11 +156,11 @@ export default function ChatScreen({ route }: ChatScreenProps) {
       keyboardVerticalOffset={90}
     >
       <FlatList
+        inverted
         data={messages}
         keyExtractor={item => item.id}
         renderItem={renderMessage}
         contentContainerStyle={styles.messageList}
-        maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
         refreshControl={
           <RefreshControl 
             refreshing={isLoadingMore} 
@@ -197,7 +197,6 @@ const styles = StyleSheet.create({
   messageList: {
     padding: 16,
     flexGrow: 1,
-    justifyContent: 'flex-end',
   },
   dateHeaderContainer: {
     alignItems: 'center',

@@ -2,11 +2,12 @@ import React, { useEffect } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onIdTokenChanged } from 'firebase/auth';
 import { doc, updateDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 import { useAuthStore } from '../store/useAuthStore';
 import { registerForPushNotificationsAsync } from '../utils/pushNotifications';
+import { updateApplicationContext } from 'react-native-watch-connectivity';
 
 import LoginScreen from '../screens/LoginScreen';
 import HomeScreen from '../screens/HomeScreen';
@@ -26,21 +27,43 @@ export default function AppNavigator() {
   const { user, loading, setUser } = useAuthStore();
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       
       if (firebaseUser) {
+        // Ensure user document exists in Firestore
+        try {
+           await setDoc(doc(db, 'users', firebaseUser.uid), {
+              id: firebaseUser.uid,
+              email: firebaseUser.email?.toLowerCase() || '',
+              name: firebaseUser.displayName || firebaseUser.email?.split('@')[0] || "User",
+           }, { merge: true });
+        } catch (e: any) {
+           // Silently handle DB save errors
+        }
+
         // Automatically request notification permissions on login
-        const token = await registerForPushNotificationsAsync();
-        if (token) {
+        const pushToken = await registerForPushNotificationsAsync();
+        if (pushToken) {
           try {
              await setDoc(doc(db, 'users', firebaseUser.uid), {
-                pushToken: token
+                pushToken: pushToken
              }, { merge: true });
           } catch (e: any) {
-             Alert.alert("DB Error", "Could not save push token to Cloud: " + e.message);
+             // Silently handle DB save errors to prevent disruptive alerts on launch
           }
         }
+        
+        // Transmit the Firebase Auth Token to the Apple Watch
+        try {
+          const idToken = await firebaseUser.getIdToken();
+          updateApplicationContext({ firebaseIdToken: idToken, uid: firebaseUser.uid });
+        } catch (e) {
+          // Silently handle WatchConnectivity errors
+        }
+      } else {
+        // Clear token on the watch if logged out
+        updateApplicationContext({ firebaseIdToken: null, uid: null });
       }
     });
     return unsubscribe;

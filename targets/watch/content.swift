@@ -1,4 +1,47 @@
 import SwiftUI
+import WatchConnectivity
+
+// MARK: - Watch Session Manager
+class WatchSessionManager: NSObject, WCSessionDelegate, ObservableObject {
+    static let shared = WatchSessionManager()
+    
+    @Published var firebaseIdToken: String?
+    @Published var uid: String?
+    
+    override init() {
+        super.init()
+        if WCSession.isSupported() {
+            let session = WCSession.default
+            session.delegate = self
+            session.activate()
+        }
+    }
+    
+    func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
+        if activationState == .activated {
+            self.session(session, didReceiveApplicationContext: session.applicationContext)
+        }
+    }
+    
+    func session(_ session: WCSession, didReceiveApplicationContext applicationContext: [String : Any]) {
+        DispatchQueue.main.async {
+            if let token = applicationContext["firebaseIdToken"] as? String {
+                self.firebaseIdToken = token
+            } else if applicationContext.keys.contains("firebaseIdToken") {
+                self.firebaseIdToken = nil
+            }
+            
+            if let uid = applicationContext["uid"] as? String {
+                self.uid = uid
+                NotificationCenter.default.post(name: NSNotification.Name("PhoneUserChanged"), object: nil)
+            } else if applicationContext.keys.contains("uid") {
+                self.uid = nil
+                NotificationCenter.default.post(name: NSNotification.Name("PhoneUserChanged"), object: nil)
+            }
+        }
+    }
+}
+
 
 // MARK: - Models
 
@@ -21,6 +64,35 @@ struct FSMessage: Identifiable {
 // MARK: - API Service
 
 class FirestoreService: ObservableObject {
+    init() {
+        NotificationCenter.default.addObserver(forName: NSNotification.Name("PhoneUserChanged"), object: nil, queue: .main) { [weak self] _ in
+            self?.fetchUsers()
+        }
+    }
+    
+    func syncWithPhone() {
+        guard let targetUid = WatchSessionManager.shared.uid else {
+            self.currentUser = nil
+            return
+        }
+        if let matched = self.allUsers.first(where: { $0.id == targetUid }) {
+            if self.currentUser?.id != matched.id {
+                self.currentUser = matched
+            }
+        } else {
+            // If the user isn't fetched yet, we just wait for fetchUsers to complete
+        }
+    }
+
+    private func createAuthRequest(url: URL, method: String = "GET") -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        if let token = WatchSessionManager.shared.firebaseIdToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        return request
+    }
+
     private var projectId: String {
         return Bundle.main.object(forInfoDictionaryKey: "FIREBASE_PROJECT_ID") as? String ?? "watchoapp-c42af"
     }
@@ -41,13 +113,14 @@ class FirestoreService: ObservableObject {
     }
     @Published var users: [FSUser] = []
     @Published var isLoadingFriends: Bool = false
+    @Published var errorMessage: String? = nil
     
     func fetchUsers() {
         guard let url = URL(string: "\(baseURL)/users") else { return }
         
-        URLSession.shared.dataTask(with: url) { data, _, error in
+        URLSession.shared.dataTask(with: self.createAuthRequest(url: url)) { data, _, error in
             if let error = error {
-                print("Network Error: \(error.localizedDescription)")
+                DispatchQueue.main.async { self.errorMessage = "Network Error: \(error.localizedDescription)" }
                 return
             }
             guard let data = data else { return }
@@ -70,10 +143,13 @@ class FirestoreService: ObservableObject {
                     
                     DispatchQueue.main.async {
                         self.allUsers = fetchedUsers
+                        self.errorMessage = nil
+                        self.syncWithPhone()
                     }
                 }
             } catch {
                 print("JSON Parsing Error: \(error)")
+                DispatchQueue.main.async { self.errorMessage = "Failed to parse users" }
             }
         }.resume()
     }
@@ -84,7 +160,7 @@ class FirestoreService: ObservableObject {
         
         DispatchQueue.main.async { self.isLoadingFriends = true }
         
-        URLSession.shared.dataTask(with: url) { data, _, error in
+        URLSession.shared.dataTask(with: self.createAuthRequest(url: url)) { data, _, error in
             if let error = error {
                 print("Network Error: \(error.localizedDescription)")
                 DispatchQueue.main.async { self.isLoadingFriends = false }
@@ -134,7 +210,7 @@ class FirestoreService: ObservableObject {
         let chatId = "\(chatArr[0])_\(chatArr[1])"
         
         // Zero Unread Count locally
-        var resetReq = URLRequest(url: URL(string: "\(baseURL)/users/\(myId)/friends/\(targetId)?updateMask.fieldPaths=unreadCount")!)
+        var resetReq = self.createAuthRequest(url: URL(string: "\(baseURL)/users/\(myId)/friends/\(targetId)?updateMask.fieldPaths=unreadCount")!)
         resetReq.httpMethod = "PATCH"
         resetReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let resetPayload: [String: Any] = ["fields": ["unreadCount": ["integerValue": "0"]]]
@@ -143,7 +219,7 @@ class FirestoreService: ObservableObject {
         
         guard let url = URL(string: "\(baseURL)/chats/\(chatId)/messages?orderBy=createdAt%20desc&pageSize=\(limit)") else { return }
         
-        URLSession.shared.dataTask(with: url) { data, _, _ in
+        URLSession.shared.dataTask(with: self.createAuthRequest(url: url)) { data, _, _ in
             guard let data = data else { return }
             
             do {
@@ -163,7 +239,7 @@ class FirestoreService: ObservableObject {
                             let isRead = (fields["isRead"] as? [String: Bool])?["booleanValue"] ?? false
                             
                             if senderId != myId && !isRead {
-                                var patchReq = URLRequest(url: URL(string: "\(self.baseURL)/chats/\(chatId)/messages/\(docId)?updateMask.fieldPaths=isRead")!)
+                                var patchReq = self.createAuthRequest(url: URL(string: "\(self.baseURL)/chats/\(chatId)/messages/\(docId)?updateMask.fieldPaths=isRead")!)
                                 patchReq.httpMethod = "PATCH"
                                 patchReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
                                 let patchPayload: [String: Any] = ["fields": ["isRead": ["booleanValue": true]]]
@@ -204,7 +280,7 @@ class FirestoreService: ObservableObject {
         
         guard let url = URL(string: "\(baseURL)/chats/\(chatId)/messages") else { return }
         
-        var request = URLRequest(url: url)
+        var request = self.createAuthRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
@@ -228,7 +304,7 @@ class FirestoreService: ObservableObject {
             
             // Increment Unread Count natively via Commit REST
             guard let commitUrl = URL(string: "\(self.baseURL):commit") else { return }
-            var commitReq = URLRequest(url: commitUrl)
+            var commitReq = self.createAuthRequest(url: commitUrl, method: "POST")
             commitReq.httpMethod = "POST"
             commitReq.setValue("application/json", forHTTPHeaderField: "Content-Type")
             let commitPayload: [String: Any] = [
@@ -242,18 +318,18 @@ class FirestoreService: ObservableObject {
                 ]
             ]
             // We'll fallback to a PATCH to avoid complex FieldTransform nesting syntax issues!
-            var patchUR = URLRequest(url: URL(string: "\(self.baseURL)/users/\(targetId)/friends/\(myId)?updateMask.fieldPaths=unreadCount")!)
+            var patchUR = self.createAuthRequest(url: URL(string: "\(self.baseURL)/users/\(targetId)/friends/\(myId)?updateMask.fieldPaths=unreadCount")!)
             patchUR.httpMethod = "PATCH"
             patchUR.setValue("application/json", forHTTPHeaderField: "Content-Type")
             // A simple REST Increment workaround: we trigger an optimistic bump if we can via the React Native receiver
             
             // Wait, we can natively GET and PATCH:
-            URLSession.shared.dataTask(with: URL(string: "\(self.baseURL)/users/\(targetId)/friends/\(myId)")!) { d,_,_ in
+            URLSession.shared.dataTask(with: self.createAuthRequest(url: URL(string: "\(self.baseURL)/users/\(targetId)/friends/\(myId)")!)) { d,_,_ in
                 if let d=d, let js=try? JSONSerialization.jsonObject(with: d) as? [String:Any], let f=js["fields"] as? [String:Any] {
                     var oldV = 0
                     if let uc=f["unreadCount"] as? [String:Any], let st=uc["integerValue"] as? String { oldV = Int(st) ?? 0 }
                     let nextP: [String:Any] = ["fields": ["unreadCount": ["integerValue": "\(oldV + 1)"]]]
-                    var pu = URLRequest(url: URL(string: "\(self.baseURL)/users/\(targetId)/friends/\(myId)?updateMask.fieldPaths=unreadCount")!)
+                    var pu = self.createAuthRequest(url: URL(string: "\(self.baseURL)/users/\(targetId)/friends/\(myId)?updateMask.fieldPaths=unreadCount")!)
                     pu.httpMethod = "PATCH"; pu.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     pu.httpBody = try? JSONSerialization.data(withJSONObject: nextP)
                     URLSession.shared.dataTask(with: pu).resume()
@@ -262,7 +338,7 @@ class FirestoreService: ObservableObject {
             
             // Fire Push Notification to Target User
             guard let userUrl = URL(string: "\(self.baseURL)/users/\(targetId)") else { return }
-            URLSession.shared.dataTask(with: userUrl) { data, _, _ in
+            URLSession.shared.dataTask(with: self.createAuthRequest(url: userUrl)) { data, _, _ in
                 guard let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                       let fields = json["fields"] as? [String: Any],
@@ -299,7 +375,7 @@ struct ContentView: View {
     var body: some View {
         Group {
             if firestore.currentUser == nil {
-                SelectUserView(firestore: firestore)
+                PhoneLoginRequiredView().environmentObject(firestore)
             } else {
                 ContactsView(firestore: firestore)
             }
@@ -310,50 +386,40 @@ struct ContentView: View {
     }
 }
 
-struct SelectUserView: View {
-    @ObservedObject var firestore: FirestoreService
+struct PhoneLoginRequiredView: View {
+    @EnvironmentObject var firestore: FirestoreService
     
     var body: some View {
-        NavigationView {
-            Group {
-                if firestore.allUsers.isEmpty {
-                    VStack {
-                        ProgressView()
-                        Text("Loading Users...")
-                            .font(.footnote)
-                            .foregroundColor(.gray)
-                            .padding(.top, 4)
-                    }
-                } else {
-                    List(firestore.allUsers) { user in
-                        Button(action: {
-                            firestore.currentUser = user
-                        }) {
-                            HStack {
-                                ZStack {
-                                    Circle().fill(Color.orange).frame(width: 32, height: 32)
-                                    Text(String(user.name.prefix(1)))
-                                        .foregroundColor(.white)
-                                        .font(.system(size: 14, weight: .bold))
-                                }
-                                VStack(alignment: .leading) {
-                                    Text(user.name).font(.headline)
-                                    Text(user.email).font(.footnote).foregroundColor(.gray)
-                                }
-                                .padding(.leading, 8)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    .listStyle(CarouselListStyle())
-                    .refreshable {
-                        firestore.fetchUsers()
-                        try? await Task.sleep(nanoseconds: 750_000_000)
-                    }
-                }
+        VStack(spacing: 8) {
+            Image(systemName: "lock.shield.fill")
+                .font(.system(size: 30))
+                .foregroundColor(.blue)
+            Text("Login Required")
+                .font(.headline)
+            Text("Open iPhone app and log in.")
+                .font(.footnote)
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+                
+            if let err = firestore.errorMessage {
+                Text(err)
+                    .font(.system(size: 10))
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
             }
-            .navigationTitle("Who are you?")
+            
+            Button("Retry Sync") {
+                if WCSession.default.activationState == .activated {
+                    WatchSessionManager.shared.session(WCSession.default, didReceiveApplicationContext: WCSession.default.applicationContext)
+                }
+                firestore.fetchUsers()
+            }
+            .font(.caption)
+            .buttonStyle(.borderedProminent)
+            .tint(.blue)
+            .padding(.top, 4)
         }
+        .padding()
     }
 }
 

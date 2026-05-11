@@ -36,14 +36,12 @@ export async function registerForPushNotificationsAsync(): Promise<string | unde
     }
     
     if (finalStatus !== 'granted') {
-        Alert.alert('Error', 'Permission Denied! Android did not grant push notifications.');
-        return;
+        return undefined;
     }
     
     try {
         const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
         if (!projectId) {
-            Alert.alert('Error', "EAS Project ID not found! Cannot request secure Expo token.");
             return undefined;
         }
         
@@ -51,12 +49,11 @@ export async function registerForPushNotificationsAsync(): Promise<string | unde
            projectId: projectId
         });
         token = tokenData.data;
-        Alert.alert('Success', "SUCCESSFULLY FETCHED TOKEN: \n" + token.substring(0, 15) + "...");
     } catch (e: any) {
-        Alert.alert("CRITICAL ERROR", "Error Fetching Token: " + e.message);
+        // Silently fail if push notifications are not configured (e.g. missing aps-environment)
     }
   } else {
-    Alert.alert('Error', 'Must use physical device for Push Notifications');
+    // Silently fail on simulators
   }
 
   return token;
